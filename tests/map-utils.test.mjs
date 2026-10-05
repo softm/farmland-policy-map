@@ -1,0 +1,15 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {inBounds,validPoint,sortRows,latestGate,normalizeQuery,createQueryCache,mercatorBounds} from '../src/map-utils.js';
+const b={south:33,north:39,west:124,east:132};
+test('현재 지도영역에 속한 좌표만 선택',()=>{assert(inBounds({lat:36,lng:127},b));assert(!inBounds({lat:40,lng:127},b));});
+test('좌표가 없는 행을 영점 좌표로 오인하지 않음',()=>{assert(!validPoint({lat:null,lng:null}));assert(!validPoint({lat:NaN,lng:127}));});
+test('세계 지도 날짜변경선 범위 처리',()=>{assert(inBounds({lat:0,lng:179},{south:-10,north:10,west:170,east:-170}));assert(!inBounds({lat:0,lng:0},{south:-10,north:10,west:170,east:-170}));});
+test('행 순서와 마커 순서를 위한 비변이 정렬',()=>{const rows=[{id:'b',name:'나',area:20},{id:'a',name:'가',area:10}];assert.equal(sortRows(rows,'name',()=>({status:'basic'}))[0].id,'a');assert.equal(rows[0].id,'b');assert.equal(sortRows(rows,'area',()=>({status:'basic'}))[0].id,'b');});
+test('우선 확인 정렬과 동점 안정성',()=>{const rows=[{id:'b',name:'B',status:'basic'},{id:'a',name:'A',status:'priority'}];assert.equal(sortRows(rows,'status',p=>p)[0].id,'a');});
+test('늦은 검색 결과는 최신 검색을 덮지 않음',()=>{const gate=latestGate(),first=gate.next(),second=gate.next();assert(!gate.current(first));assert(gate.current(second));gate.cancel();assert(!gate.current(second));});
+test('검색어 정규화',()=>assert.equal(normalizeQuery('  서산시   대산읍  '),'서산시 대산읍'));
+test('동일 주소 동시 요청은 한 번만 실행',async()=>{let calls=0;const search=createQueryCache(async q=>{calls++;await new Promise(r=>setTimeout(r,8));return[q];});const [a,c]=await Promise.all([search('주소'),search('주소')]);assert.deepEqual(a,c);assert.equal(calls,1);await search('주소');assert.equal(calls,1);});
+test('실패한 주소 요청은 재시도 가능',async()=>{let calls=0;const search=createQueryCache(async()=>{calls++;if(calls===1)throw Error('offline');return[];});await assert.rejects(search('주소'));assert.deepEqual(await search('주소'),[]);assert.equal(calls,2);});
+test('메모리 캐시 최대 용량 제한',async()=>{let calls=0;const search=createQueryCache(async q=>{calls++;return[q];},{max:1});await search('a');await search('b');await search('a');assert.equal(calls,3);});
+test('WMS 경계는 EPSG3857 x,y 순서',()=>{const v=mercatorBounds({west:0,south:0,east:1,north:1});assert(Math.abs(v[0])<1e-8);assert(Math.abs(v[1])<1e-8);assert(v[2]>111000&&v[3]>111000);});
+test('영점 좌표와 지도 경계 포함 여부',()=>{assert(validPoint({lat:0,lng:0}));assert(inBounds({lat:33,lng:124},b));assert(inBounds({lat:39,lng:132},b));});
