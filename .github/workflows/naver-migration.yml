@@ -1,0 +1,56 @@
+name: Validate Naver migration
+on:
+  push:
+    branches: [feat/naver-map-homecare]
+    paths:
+      - .github/workflows/naver-migration.yml
+      - scripts/migrate-naver.mjs
+      - src/naver-map.js
+      - src/map-utils.js
+      - assets/naver-ui.css
+      - tests/map-utils.test.mjs
+permissions:
+  contents: write
+concurrency:
+  group: naver-migration
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply guarded source migration
+        run: node scripts/migrate-naver.mjs
+      - run: npm run check && npm test && npm run build
+      - name: Install Chromium
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Verify records and responsive fallback without an external map
+        env:
+          APP_URL: http://localhost:3000/
+          REQUIRE_MAP: '0'
+        run: |
+          python -m http.server 3000 >/tmp/farmland-http.log 2>&1 &
+          python tests/browser_smoke.py
+      - name: Commit validated source changes to the feature branch
+        run: |
+          git add src/app.js src/domain.js index.html sw.js package.json scripts/build.mjs tests/browser_smoke.py README.md
+          if ! git diff --staged --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'feat: apply validated Naver map and homecare UI migration'
+            git push origin HEAD:feat/naver-map-homecare
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: naver-preflight-offline
+          path: test-results/
