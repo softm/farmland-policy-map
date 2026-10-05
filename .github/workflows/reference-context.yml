@@ -1,0 +1,38 @@
+name: Naver reference context
+on:
+  push:
+    branches: [feat/naver-map-homecare]
+    paths: [.github/workflows/reference-context.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the requested public reference at a pinned commit
+        run: |
+          python - <<'PY'
+          import urllib.request, pathlib, re, shutil
+          root=pathlib.Path('review-context'); root.mkdir()
+          for name in ['index.html','src','assets','tests','scripts','package.json','sw.js','manifest.webmanifest','README.md','docs']:
+              p=pathlib.Path(name)
+              if p.is_dir(): shutil.copytree(p,root/name)
+              elif p.is_file(): shutil.copy2(p,root/name)
+          reference=root/'reference';reference.mkdir()
+          base='https://raw.githubusercontent.com/softm/homecare-nationwide-care-services-map/263fddd1393cae2fc840d64a3fc80c353c1fcdb3/'
+          files=['index.html','naver-geocoder.js','map-experience.js','map-marker-placement.js','map-marker-labels.js','care-mobile-focus.css','care-mobile-focus.js','care-basket-map.js','README.md']
+          for name in files:
+              data=urllib.request.urlopen(base+name,timeout=30).read()
+              (reference/name).write_bytes(data)
+              if name=='index.html':
+                  lines=data.decode().splitlines()
+                  for i,line in enumerate(lines):
+                      if re.search(r'ncp.*(?:[Cc]lient|[Kk]ey)|maps\.js\?|new naver\.maps\.Map|skipIdleUntil',line):
+                          print(name,i+1,line[:2000])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: naver-migration-context
+          path: review-context/
+          retention-days: 7
