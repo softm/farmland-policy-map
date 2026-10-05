@@ -1,9 +1,8 @@
 import {readFile,writeFile} from 'node:fs/promises';
 let app=await readFile('src/app.js','utf8');
-// String replacement interprets $$ as a literal $. Preserve the multi-element
-// selector with a callback replacement, including already generated sources.
-app=app.replaceAll("$('[data-map-type]').forEach",()=>"$$('[data-map-type]').forEach");
-if(/(?<!\$)\$\([^\n]*?\)\.forEach/.test(app))throw Error('Single-element selector cannot use forEach');
+// Callback replacements preserve literal $$; the lookbehind makes this repair idempotent.
+app=app.replace(/(?<!\$)\$\('\[data-map-type\]'\)\.forEach/g,()=>"$$('[data-map-type]').forEach");
+if(/(?<!\$)\$\([^)]*\)\.forEach/.test(app))throw Error('Single-element selector cannot use forEach');
 if(!app.includes("dataset.recordsReady='true'")){
  const needle="state.parcels.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));render();}";
  if(!app.includes(needle))throw Error('Missing hydration anchor');
