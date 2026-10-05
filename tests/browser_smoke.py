@@ -11,7 +11,7 @@ out=Path(os.getenv('SCREENSHOT_DIR','test-results'));out.mkdir(exist_ok=True)
 with sync_playwright() as pw:
     browser=pw.chromium.launch(**({'executable_path':'/usr/bin/chromium','args':['--no-sandbox']} if Path('/usr/bin/chromium').exists() else {}))
     context=browser.new_context(viewport={'width':1440,'height':1000},locale='ko-KR',accept_downloads=True)
-    page=context.new_page(); errors=[]; page.on('pageerror',lambda e: errors.append(str(e)))
+    page=context.new_page(); errors=[]; page.on('pageerror',lambda e: (errors.append(str(e)),print('BROWSER ERROR:',str(e))))
     if not LIVE:
         page.route(re.compile(r'https://.*'),lambda route: route.abort())
         if URL.startswith('https://farmland.test/'):
@@ -25,13 +25,29 @@ with sync_playwright() as pw:
                 route.fulfill(status=200,content_type=mimetypes.guess_type(str(file))[0] or 'application/octet-stream',body=file.read_bytes())
             page.route('https://farmland.test/**',serve)
     response=page.goto(URL,wait_until='networkidle');assert response.status==200
+    # Initial data hydration must finish before taking screenshots or editing.
+    page.wait_for_function("document.body.dataset.recordsReady === 'true'",timeout=15000)
     assert page.title().startswith('농지안심맵')
     if LIVE:
-        page.wait_for_selector('.leaflet-container',timeout=15000)
-        page.wait_for_selector('img.leaflet-tile-loaded',timeout=20000)
+        page.wait_for_selector('body[data-map-ready="true"]',timeout=20000)
+        page.wait_for_function("Array.from(document.querySelectorAll('#map img')).some(i=>i.naturalWidth>100&&/naver|pstatic/.test(i.src))",timeout=20000)
+    if LIVE:
+        assert page.locator('#map').get_attribute('data-provider')=='naver'
+        assert page.evaluate('typeof window.L')=='undefined'
+        page.locator('[data-map-type="normal"]').click()
+        assert page.locator('#map').get_attribute('data-map-type')=='normal'
+        page.locator('[data-map-type="hybrid"]').click()
+        page.locator('#search').fill('경기도 성남시 분당구 불정로 6')
+        page.locator('#search-form button[type="submit"]').click()
+        page.wait_for_selector('#search-results button[data-result]',timeout=15000)
+        assert '네이버 주소' in page.locator('#search-results').inner_text()
+        page.locator('#search-results button[data-result]').first.click()
+        page.locator('#search-clear').click()
     page.screenshot(path=str(out/'desktop.png'),full_page=True)
     page.locator('#add-parcel').click()
     page.locator('#f-name').fill('검증용 농지')
+    page.locator('#f-lat').fill('37.3595704')
+    page.locator('#f-lng').fill('127.105399')
     page.locator('#f-acquisition').select_option('inheritance')
     page.locator('#f-use').select_option('leased')
     page.locator('#f-leaseReason').select_option('inheritance')
@@ -43,9 +59,21 @@ with sync_playwright() as pw:
     page.wait_for_selector('#detail:not([hidden])')
     assert '상속농지' in page.locator('#detail').inner_text()
     assert page.locator('#count-total').inner_text()=='1'
+    if LIVE:
+        page.wait_for_selector('.naver-pin[data-pin]')
+        assert page.locator('.pin-rank').first.inner_text()=='1'
+        page.locator('[data-action="close-detail"]').click()
+        page.locator('#select-map-all').uncheck()
+        assert page.locator('.naver-pin').count()==0
+        page.locator('#select-map-all').check()
+        page.wait_for_selector('.naver-pin')
+        page.locator('.parcel-card').first.click()
     page.locator('[data-task="inheritance"]').check()
     page.wait_for_timeout(300)
     page.reload(wait_until='networkidle')
+    print('Waiting for restored records; page errors:',errors)
+    page.wait_for_function("document.body.dataset.recordsReady === 'true'",timeout=15000)
+    print('Restored count:',page.locator('#count-total').inner_text())
     assert page.locator('#count-total').inner_text()=='1'
     page.locator('.parcel-card').first.click()
     assert page.locator('[data-task="inheritance"]').is_checked()
@@ -90,6 +118,6 @@ with sync_playwright() as pw:
     page.wait_for_timeout(500)
     assert page.locator('#count-total').inner_text()=='1'
     assert not errors, errors
-    (out/'verification.json').write_text(json.dumps({'url':URL,'liveMapChecked':LIVE,'browserErrors':errors,'checks':['page load','register','assessment','task persistence','benefits','evidence','backup','policy filter','mobile overflow','delete','restore'],'screenshots':['desktop.png','policies.png','mobile.png']},ensure_ascii=False,indent=2))
+    (out/'verification.json').write_text(json.dumps({'url':URL,'liveMapChecked':LIVE,'browserErrors':errors,'naverMapAndGeocoderChecked':LIVE,'checks':['page load','register','assessment','task persistence','benefits','evidence','backup','policy filter','mobile overflow','delete','restore'],'screenshots':['desktop.png','policies.png','mobile.png']},ensure_ascii=False,indent=2))
     context.close();browser.close()
 print('Browser smoke tests passed. Live map checked:',LIVE)

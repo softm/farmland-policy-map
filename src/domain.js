@@ -1,5 +1,5 @@
 /** Deterministic pre-checks, NOT official eligibility, investigation odds or legal advice. */
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 export const REVIEWED_AT = '2026-10-05';
 export const SOURCES = {
   portal:{title:'농지공간포털',url:'https://njy.mafra.go.kr/'},
