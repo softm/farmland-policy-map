@@ -21,7 +21,7 @@ test('PNU는 19자리 문자열을 유지',()=>assert.equal(p({pnu:'001234567890
 test('존재하지 않는 날짜 거부',()=>assert.throws(()=>p({acquiredAt:'2026-02-30'})));
 test('저장 ID·이름 확인',()=>{assert.throws(()=>p({id:'<script>'}));assert.throws(()=>p({name:''}));});
 test('사용자 데이터는 HTML escape',()=>assert.equal(escapeHtml('<img onerror="x">&\''),'&lt;img onerror=&quot;x&quot;&gt;&amp;&#39;'));
-test('미등록 선택값은 unknown',()=>assert.equal(p({use:'automatically-legal'})).use,'unknown');
+test('미등록 선택값은 unknown',()=>assert.equal(p({use:'automatically-legal'}).use,'unknown'));
 test('증빙 포함 백업 기본 형식',()=>assert.equal(validateBackup({schema:'farmland-policy-map/v1',parcels:[p()],evidence:[]}).parcels.length,1));
 test('다른 앱의 파일·중복 ID 거부',()=>{assert.throws(()=>validateBackup({schema:'x',parcels:[],evidence:[]}));assert.throws(()=>validateBackup({schema:'farmland-policy-map/v1',parcels:[p(),p()],evidence:[]}));});
 test('증빙의 잘못된 연결·실행 가능 첨부 거부',()=>{for(const data of ['data:text/html;base64,PHNjcmlwdD4=','data:image/svg+xml;base64,AAAA','javascript:alert(1)'])assert.throws(()=>validateBackup({schema:'farmland-policy-map/v1',parcels:[p()],evidence:[{id:'ev1',parcelId:'test-1',data}]}));assert.throws(()=>validateBackup({schema:'farmland-policy-map/v1',parcels:[p()],evidence:[{id:'ev1',parcelId:'missing',data:''}]}));});
