@@ -2,43 +2,68 @@ name: Test, deploy and verify Pages
 on:
   push:
     branches: [main]
+    paths-ignore: ['README.md', 'docs/**']
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
 concurrency:
   group: farmland-pages
   cancel-in-progress: false
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pages: write
+    outputs:
+      page_url: ${{ steps.pages.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm run check
       - run: npm test
       - run: npm run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    outputs:
-      page_url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish through the configured gh-pages source
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_branch=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.source.branch')
+          source_path=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.source.path')
+          test "$source_branch" = gh-pages
+          test "$source_path" = /
+          page_url=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq '.html_url')
+          echo "page_url=$page_url" >> "$GITHUB_OUTPUT"
+          git fetch origin gh-pages
+          publish_dir="$RUNNER_TEMP/farmland-pages"
+          git worktree add --detach "$publish_dir" origin/gh-pages
+          rsync -a --delete --exclude=.git dist/ "$publish_dir/"
+          cd "$publish_dir"
+          git add --all
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m "Deploy farmland app $GITHUB_SHA"
+          published_commit=$(git rev-parse HEAD)
+          git push origin HEAD:gh-pages
+          gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds"
+          for attempt in $(seq 1 60); do
+            build=$(gh api "repos/$GITHUB_REPOSITORY/pages/builds/latest")
+            status=$(jq -r '.status' <<< "$build")
+            commit=$(jq -r '.commit' <<< "$build")
+            echo "Pages build $attempt: $status ($commit)"
+            if [ "$commit" = "$published_commit" ] && [ "$status" = built ]; then exit 0; fi
+            if [ "$commit" = "$published_commit" ] && [ "$status" = errored ]; then echo "$build"; exit 1; fi
+            sleep 5
+          done
+          echo 'Pages build did not finish within the verification window.' >&2
+          exit 1
   verify:
-    needs: deploy
+    needs: publish
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -52,7 +77,7 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Verify live desktop and mobile workflows
         env:
-          APP_URL: ${{ needs.deploy.outputs.page_url }}
+          APP_URL: ${{ needs.publish.outputs.page_url }}
           REQUIRE_MAP: '1'
         run: python tests/browser_smoke.py
       - name: Save verification evidence
